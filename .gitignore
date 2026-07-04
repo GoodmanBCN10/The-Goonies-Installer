@@ -15,3 +15,5 @@ Thumbs.db
 
 # CMake
 CMakeUserPresets.json
+
+*.zip
