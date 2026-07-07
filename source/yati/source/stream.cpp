@@ -18,14 +18,23 @@ Result Stream::Read(void* _buf, s64 off, s64 size, u64* bytes_read_out) {
         // to handle this, simply read the data into a buffer and discard it.
         if (off > m_offset) {
             const auto skip_size = off - m_offset;
-            std::vector<u8> temp_buf(skip_size);
+            const auto chunk_size = std::min<s64>(skip_size, 0x100000); // 1MB chunks
+            std::vector<u8> temp_buf(chunk_size);
             u64 bytes_read;
-            R_TRY(ReadChunk(temp_buf.data(), temp_buf.size(), &bytes_read));
+            R_TRY(ReadChunk(temp_buf.data(), chunk_size, &bytes_read));
+
+            if (bytes_read == 0) {
+                break; // EOF reached
+            }
 
             m_offset += bytes_read;
         } else {
             u64 bytes_read;
             R_TRY(ReadChunk(buf, size, &bytes_read));
+
+            if (bytes_read == 0) {
+                break; // EOF reached
+            }
 
             *bytes_read_out += bytes_read;
             buf += bytes_read;

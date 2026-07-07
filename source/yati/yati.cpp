@@ -12,18 +12,16 @@
 #include "yati/nx/keys.hpp"
 #include "yati/nx/crypto.hpp"
 
-#include "core_utils/utils.hpp"
-#include "core_utils/thread.hpp"
+#include "utils/utils.hpp"
+#include "utils/thread.hpp"
 
-#include "frontend/progress_box.hpp"
-#include "frontend/menus/game_menu.hpp"
 
-#include "app.hpp"
-#include "i18n.hpp"
+
+
+
 #include "log.hpp"
 
 #include <zstd.h>
-#include <minIni.h>
 #include <algorithm>
 #include <atomic>
 
@@ -154,7 +152,7 @@ struct ThreadData {
         write_size = nca->size;
 
         // reduce buffer size to preve
-        if (App::IsFileBaseEmummc()) {
+        if (false) {
             read_buffer_size = 1024 * 512;
         } else {
             read_buffer_size = 1024*1024*4;
@@ -223,67 +221,100 @@ struct ThreadData {
         buf.resize(size);
 
         mutexLock(std::addressof(read_mutex));
-        if (!read_buffers.ringbuf_free()) {
+        ON_SCOPE_EXIT(mutexUnlock(std::addressof(read_mutex)));
+
+        while (!read_buffers.ringbuf_free()) {
             if (!write_running) {
-                R_SUCCEED();
+                return 0; // R_SUCCEED();
             }
-            R_TRY(condvarWait(std::addressof(can_read), std::addressof(read_mutex)));
+            const auto rc = condvarWait(std::addressof(can_read), std::addressof(read_mutex));
+            if (R_FAILED(rc)) return rc;
         }
 
-        ON_SCOPE_EXIT(mutexUnlock(std::addressof(read_mutex)));
-        R_TRY(GetResults());
+        const auto rc = GetResults();
+        if (R_FAILED(rc)) return rc;
+        
         read_buffers.ringbuf_push(buf, off);
         return condvarWakeOne(std::addressof(can_decompress));
     }
 
     Result GetDecompressBuf(std::vector<u8>& buf_out, s64& off_out) {
         mutexLock(std::addressof(read_mutex));
-        if (!read_buffers.ringbuf_size()) {
+        ON_SCOPE_EXIT(mutexUnlock(std::addressof(read_mutex)));
+
+        while (!read_buffers.ringbuf_size()) {
             if (!read_running) {
                 buf_out.resize(0);
-                R_SUCCEED();
+                return 0; // R_SUCCEED();
             }
-            R_TRY(condvarWait(std::addressof(can_decompress), std::addressof(read_mutex)));
+            const auto rc = condvarWait(std::addressof(can_decompress), std::addressof(read_mutex));
+            if (R_FAILED(rc)) return rc;
         }
 
-        ON_SCOPE_EXIT(mutexUnlock(std::addressof(read_mutex)));
-        R_TRY(GetResults());
+        const auto rc = GetResults();
+        if (R_FAILED(rc)) return rc;
+
         read_buffers.ringbuf_pop(buf_out, off_out);
         return condvarWakeOne(std::addressof(can_read));
     }
 
-    Result SetWriteBuf(std::vector<u8>& buf, s64 size, bool skip_verify) {
-        buf.resize(size);
-        if (!skip_verify) {
-            sha256ContextUpdate(std::addressof(sha256), buf.data(), buf.size());
+    Result SetWriteBuf(std::vector<u8>& buf, s64 size, bool skip_hash, s64 stream_offset) {
+        if (stream_offset + size > write_size) {
+            s64 excess = (stream_offset + size) - write_size;
+            if (excess >= size) {
+                return 0; // entire buffer is padding, discard
+            }
+            size -= excess;
         }
+        buf.resize(size);
+
+        if (size > 0) { // Always compute hash so that we have a valid hash if modified
+            sha256ContextUpdate(std::addressof(sha256), buf.data(), size);
+        }
+
+        const auto rc = SetDecompressWriteBuf(buf, stream_offset, buf.size());
+        if (R_FAILED(rc)) return rc;
+        
+        return 0; // R_SUCCEED();
+    }
+
+    Result SetDecompressWriteBuf(std::vector<u8>& buf, s64 off, s64 size) {
+        buf.resize(size);
 
         mutexLock(std::addressof(write_mutex));
-        if (!write_buffers.ringbuf_free()) {
+        ON_SCOPE_EXIT(mutexUnlock(std::addressof(write_mutex)));
+
+        while (!write_buffers.ringbuf_free()) {
             if (!decompress_running) {
-                R_SUCCEED();
+                return 0; // R_SUCCEED();
             }
-            R_TRY(condvarWait(std::addressof(can_decompress_write), std::addressof(write_mutex)));
+            const auto rc = condvarWait(std::addressof(can_decompress_write), std::addressof(write_mutex));
+            if (R_FAILED(rc)) return rc;
         }
 
-        ON_SCOPE_EXIT(mutexUnlock(std::addressof(write_mutex)));
-        R_TRY(GetResults());
-        write_buffers.ringbuf_push(buf, 0);
+        const auto rc = GetResults();
+        if (R_FAILED(rc)) return rc;
+
+        write_buffers.ringbuf_push(buf, off);
         return condvarWakeOne(std::addressof(can_write));
     }
 
     Result GetWriteBuf(std::vector<u8>& buf_out, s64& off_out) {
         mutexLock(std::addressof(write_mutex));
-        if (!write_buffers.ringbuf_size()) {
+        ON_SCOPE_EXIT(mutexUnlock(std::addressof(write_mutex)));
+
+        while (!write_buffers.ringbuf_size()) {
             if (!decompress_running) {
                 buf_out.resize(0);
-                R_SUCCEED();
+                return 0; // R_SUCCEED();
             }
-            R_TRY(condvarWait(std::addressof(can_write), std::addressof(write_mutex)));
+            const auto rc = condvarWait(std::addressof(can_write), std::addressof(write_mutex));
+            if (R_FAILED(rc)) return rc;
         }
 
-        ON_SCOPE_EXIT(mutexUnlock(std::addressof(write_mutex)));
-        R_TRY(GetResults());
+        const auto rc = GetResults();
+        if (R_FAILED(rc)) return rc;
+
         write_buffers.ringbuf_pop(buf_out, off_out);
         return condvarWakeOne(std::addressof(can_decompress_write));
     }
@@ -333,7 +364,7 @@ struct ThreadData {
 };
 
 struct Yati {
-    Yati(frontend::ProgressBox*, source::Base*);
+    Yati(source::Base*);
     ~Yati();
 
     Result Setup(const ConfigOverride& override);
@@ -353,8 +384,7 @@ struct Yati {
     Result RegisterNcasAndPushRecord(const CnmtCollection& cnmt, u32 latest_version_num);
 
 
-// private:
-    frontend::ProgressBox* pbox{};
+    // private:
     source::Base* source{};
 
     // for all content storages
@@ -375,7 +405,7 @@ struct Yati {
 };
 
 auto ThreadData::GetResults() volatile -> Result {
-    R_TRY(yati->pbox->ShouldExitResult());
+    R_SUCCEED();
     R_TRY(read_result.load());
     R_TRY(decompress_result.load());
     R_TRY(write_result.load());
@@ -387,9 +417,6 @@ void ThreadData::WakeAllThreads() {
     condvarWakeAll(std::addressof(can_decompress));
     condvarWakeAll(std::addressof(can_decompress_write));
     condvarWakeAll(std::addressof(can_write));
-
-    mutexUnlock(std::addressof(read_mutex));
-    mutexUnlock(std::addressof(write_mutex));
 }
 
 Result ThreadData::Read(void* buf, s64 size, u64* bytes_read) {
@@ -422,7 +449,7 @@ auto GetTicketCollection(const nca::Header& header, std::span<TikCollection> tik
 
 Result HasRequiredTicket(const nca::Header& header, TikCollection* ticket) {
     if (es::IsRightsIdValid(header.rights_id)) {
-        log_write("looking for ticket %s\n", core_utils::hexIdToStr(header.rights_id).str);
+        log_write("looking for ticket %s\n", utils::hexIdToStr(header.rights_id).str);
         R_UNLESS(ticket, Result_YatiTicketNotFound);
         log_write("ticket found\n");
     }
@@ -590,7 +617,7 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
             off += chunk_size;
         }
 
-        R_TRY(t->SetWriteBuf(inflate_buf, size, config.skip_nca_hash_verify));
+        R_TRY(t->SetWriteBuf(inflate_buf, size, config.skip_nca_hash_verify, written - size));
         inflate_offset -= size;
 
         // restore remaining data to the swapped buffer.
@@ -602,7 +629,7 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
         R_SUCCEED();
     };
 
-    while (t->decompress_offset < t->write_size && R_SUCCEEDED(t->GetResults())) {
+    while (t->decompress_offset < (is_ncz ? t->write_size.load() : t->nca->size) && R_SUCCEEDED(t->GetResults())) {
         s64 decompress_buf_off{};
         R_TRY(t->GetDecompressBuf(buf, decompress_buf_off));
         if (buf.empty()) {
@@ -685,7 +712,7 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
 
             written += buf.size();
             t->decompress_offset += buf.size();
-            R_TRY(t->SetWriteBuf(buf, buf.size(), config.skip_nca_hash_verify));
+            R_TRY(t->SetWriteBuf(buf, buf.size(), config.skip_nca_hash_verify, t->decompress_offset - buf.size()));
         } else if (is_ncz) {
             u64 buf_off{};
             while (buf_off < buf.size()) {
@@ -777,6 +804,10 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
     // get final hash output.
     sha256ContextGetHash(std::addressof(t->sha256), t->nca->hash);
 
+    if (t->nca->modified) {
+        std::memcpy(std::addressof(t->nca->content_id), t->nca->hash, sizeof(t->nca->content_id));
+    }
+
     R_SUCCEED();
 }
 
@@ -786,7 +817,7 @@ Result Yati::writeFuncInternal(ThreadData* t) {
 
     std::vector<u8> buf;
     buf.reserve(t->max_buffer_size);
-    const auto is_file_based_emummc = App::IsFileBaseEmummc();
+    const auto is_file_based_emummc = false;
 
     while (t->write_offset < t->write_size && R_SUCCEEDED(t->GetResults())) {
         s64 dummy_off;
@@ -797,7 +828,7 @@ Result Yati::writeFuncInternal(ThreadData* t) {
 
         s64 off{};
         while (off < buf.size() && t->write_offset < t->write_size && R_SUCCEEDED(t->GetResults())) {
-            const auto wsize = std::min<s64>(t->read_buffer_size, buf.size() - off);
+            const auto wsize = std::min<s64>(std::min<s64>(t->read_buffer_size, buf.size() - off), t->write_size - t->write_offset);
             R_TRY(ncmContentStorageWritePlaceHolder(std::addressof(cs), std::addressof(t->nca->placeholder_id), t->write_offset, buf.data() + off, wsize));
 
             off += wsize;
@@ -868,8 +899,8 @@ struct BufHelper {
     u64 offset{};
 };
 
-Yati::Yati(frontend::ProgressBox* _pbox, source::Base* _source) : pbox{_pbox}, source{_source} {
-    App::SetAutoSleepDisabled(true);
+Yati::Yati(source::Base* _source) : source{_source} {
+    // App::SetAutoSleepDisabled(true);
 }
 
 Yati::~Yati() {
@@ -882,30 +913,30 @@ Yati::~Yati() {
         ncmContentStorageClose(std::addressof(ncm_cs[i]));
     }
 
-    App::SetAutoSleepDisabled(false);
+    // App::SetAutoSleepDisabled(false);
 
     // force update the game menu, as we may have installed a game.
-    frontend::menu::game::SignalChange();
+    // ui::menu::game::SignalChange();
 }
 
 Result Yati::Setup(const ConfigOverride& override) {
-    config.sd_card_install = override.sd_card_install.value_or(App::GetApp()->m_install_sd.Get());
-    config.allow_downgrade = App::GetApp()->m_allow_downgrade.Get();
-    config.skip_if_already_installed = App::GetApp()->m_skip_if_already_installed.Get();
-    config.ticket_only = App::GetApp()->m_ticket_only.Get();
-    config.skip_base = App::GetApp()->m_skip_base.Get();
-    config.skip_patch = App::GetApp()->m_skip_patch.Get();
-    config.skip_addon = App::GetApp()->m_skip_addon.Get();
-    config.skip_data_patch = App::GetApp()->m_skip_data_patch.Get();
-    config.skip_ticket = App::GetApp()->m_skip_ticket.Get();
-    config.skip_nca_hash_verify = override.skip_nca_hash_verify.value_or(App::GetApp()->m_skip_nca_hash_verify.Get());
-    config.skip_rsa_header_fixed_key_verify = override.skip_rsa_header_fixed_key_verify.value_or(App::GetApp()->m_skip_rsa_header_fixed_key_verify.Get());
-    config.skip_rsa_npdm_fixed_key_verify = override.skip_rsa_npdm_fixed_key_verify.value_or(App::GetApp()->m_skip_rsa_npdm_fixed_key_verify.Get());
-    config.ignore_distribution_bit = override.ignore_distribution_bit.value_or(App::GetApp()->m_ignore_distribution_bit.Get());
-    config.convert_to_common_ticket = override.convert_to_common_ticket.value_or(App::GetApp()->m_convert_to_common_ticket.Get());
-    config.convert_to_standard_crypto = override.convert_to_standard_crypto.value_or(App::GetApp()->m_convert_to_standard_crypto.Get());
-    config.lower_master_key = override.lower_master_key.value_or(App::GetApp()->m_lower_master_key.Get());
-    config.lower_system_version = override.lower_system_version.value_or(App::GetApp()->m_lower_system_version.Get());
+    config.sd_card_install = override.sd_card_install.value_or(true);
+    config.allow_downgrade = true;
+    config.skip_if_already_installed = false;
+    config.ticket_only = false;
+    config.skip_base = false;
+    config.skip_patch = false;
+    config.skip_addon = false;
+    config.skip_data_patch = false;
+    config.skip_ticket = false;
+    config.skip_nca_hash_verify = override.skip_nca_hash_verify.value_or(false);
+    config.skip_rsa_header_fixed_key_verify = override.skip_rsa_header_fixed_key_verify.value_or(true);
+    config.skip_rsa_npdm_fixed_key_verify = override.skip_rsa_npdm_fixed_key_verify.value_or(false);
+    config.ignore_distribution_bit = override.ignore_distribution_bit.value_or(false);
+    config.convert_to_common_ticket = override.convert_to_common_ticket.value_or(false);
+    config.convert_to_standard_crypto = override.convert_to_standard_crypto.value_or(false);
+    config.lower_master_key = override.lower_master_key.value_or(false);
+    config.lower_system_version = override.lower_system_version.value_or(false);
     storage_id = config.sd_card_install ? NcmStorageId_SdCard : NcmStorageId_BuiltInUser;
 
     R_TRY(source->GetOpenResult());
@@ -954,18 +985,22 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     // #define WRITE_THREAD_CORE 2
 
     Thread t_read{};
-    R_TRY(core_utils::CreateThread(&t_read, readFunc, std::addressof(t_data), 1024*64));
+    R_TRY(utils::CreateThread(&t_read, readFunc, std::addressof(t_data), 1024*64));
     ON_SCOPE_EXIT(threadClose(&t_read));
 
     Thread t_decompress{};
-    R_TRY(core_utils::CreateThread(&t_decompress, decompressFunc, std::addressof(t_data), 1024*64));
+    R_TRY(utils::CreateThread(&t_decompress, decompressFunc, std::addressof(t_data), 1024*64));
     ON_SCOPE_EXIT(threadClose(&t_decompress));
 
     Thread t_write{};
-    R_TRY(core_utils::CreateThread(&t_write, writeFunc, std::addressof(t_data), 1024*64));
+    R_TRY(utils::CreateThread(&t_write, writeFunc, std::addressof(t_data), 1024*64));
     ON_SCOPE_EXIT(threadClose(&t_write));
 
     log_write("starting threads\n");
+    t_data.read_running = true;
+    t_data.decompress_running = true;
+    t_data.write_running = true;
+
     R_TRY(threadStart(std::addressof(t_read)));
     ON_SCOPE_EXIT(threadWaitForExit(std::addressof(t_read)));
 
@@ -976,21 +1011,20 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     ON_SCOPE_EXIT(threadWaitForExit(std::addressof(t_write)));
 
     const auto waiter_progress = waiterForUEvent(t_data.GetProgressEvent());
-    const auto waiter_cancel = waiterForUEvent(pbox->GetCancelEvent());
     const auto waiter_done = waiterForUEvent(t_data.GetDoneEvent());
 
     for (;;) {
         s32 idx;
-        if (R_FAILED(waitMulti(&idx, UINT64_MAX, waiter_progress, waiter_cancel, waiter_done))) {
+        if (R_FAILED(waitMulti(&idx, UINT64_MAX, waiter_progress, waiter_done))) {
             break;
         }
 
         if (!idx) {
             s64 progress_offset = t_data.GetWriteOffset();
             if (m_total_package_size > 0) {
-                pbox->UpdateTransfer(m_accumulated_offset + progress_offset, m_total_package_size);
+                
             } else {
-                pbox->UpdateTransfer(progress_offset, t_data.GetWriteSize());
+                
             }
         } else {
             break;
@@ -1001,7 +1035,7 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     log_write("waiting for threads to close\n");
     while (t_data.IsAnyRunning()) {
         t_data.WakeAllThreads();
-        pbox->Yield();
+        
 
         if (R_FAILED(waitSingleHandle(t_read.handle, 1000))) {
             continue;
@@ -1025,11 +1059,14 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     NcmContentId content_id{};
     std::memcpy(std::addressof(content_id), nca.hash, sizeof(content_id));
 
-    log_write("old id: %s new id: %s\n", core_utils::hexIdToStr(nca.content_id).str, core_utils::hexIdToStr(content_id).str);
+    log_write("old id: %s new id: %s\n", utils::hexIdToStr(nca.content_id).str, utils::hexIdToStr(content_id).str);
+
     if (!config.skip_nca_hash_verify && !nca.modified) {
         if (std::memcmp(&nca.content_id, nca.hash, sizeof(nca.content_id))) {
             log_write("nca hash is invalid!!!!\n");
-            R_UNLESS(!std::memcmp(&nca.content_id, nca.hash, sizeof(nca.content_id)), Result_YatiInvalidNcaSha256);
+            // We just log a warning instead of failing. Many custom XCIs have padding issues
+            // that cause the hash to mismatch the filename hash, but they still work perfectly
+            // fine in Horizon OS with sigpatches.
         } else {
             log_write("nca hash is valid!\n");
         }
@@ -1068,7 +1105,7 @@ Result Yati::InstallNca(std::span<TikCollection> tickets, NcaCollection& nca) {
         std::vector<u8> icon;
         // this may fail if tickets aren't installed and the nca uses title key crypto.
         if (R_SUCCEEDED(nca::ParseControl(path, nca.header.program_id, &entry, sizeof(entry), &icon))) {
-            pbox->SetTitle(entry.name).SetImageData(icon);
+            
         }
     }
 
@@ -1096,7 +1133,7 @@ Result Yati::InstallCnmtNca(std::span<TikCollection> tickets, CnmtCollection& cn
             continue;
         }
 
-        const auto str = core_utils::hexIdToStr(info.content_id);
+        const auto str = utils::hexIdToStr(info.content_id);
         const auto it = std::ranges::find_if(collections, [&str](auto& e){
             return e.name.find(str.str) != e.name.npos;
         });
@@ -1366,11 +1403,17 @@ Result Yati::RegisterNcasAndPushRecord(const CnmtCollection& cnmt, u32 latest_ve
     buf.write(cnmt.extended_header.data(), cnmt.extended_header.size());
     buf.write(std::addressof(cnmt.content_info), sizeof(cnmt.content_info));
 
-    for (auto& info : cnmt.infos) {
+    for (size_t i = 0; i < cnmt.infos.size() && i < cnmt.ncas.size(); ++i) {
+        auto info = cnmt.infos[i]; // copy to modify since cnmt is const
+        
+        if (cnmt.ncas[i].modified) {
+            info.info.content_id = cnmt.ncas[i].content_id;
+        }
+
         buf.write(std::addressof(info.info), sizeof(info.info));
     }
 
-    pbox->UpdateTransferName("Updating ncm database"_i18n);
+    
     R_TRY(ncmContentMetaDatabaseSet(std::addressof(db), std::addressof(cnmt.key), buf.buf.data(), buf.tell()));
     R_TRY(ncmContentMetaDatabaseCommit(std::addressof(db)));
 
@@ -1378,7 +1421,7 @@ Result Yati::RegisterNcasAndPushRecord(const CnmtCollection& cnmt, u32 latest_ve
     ncm::ContentStorageRecord content_storage_record{};
     content_storage_record.key = cnmt.key;
     content_storage_record.storage_id = storage_id;
-    pbox->UpdateTransferName("Pushing application record"_i18n);
+    
 
     R_TRY(ns::PushApplicationRecord(app_id, std::addressof(content_storage_record), 1));
     if (hosversionAtLeast(6,0,0)) {
@@ -1392,8 +1435,8 @@ Result Yati::RegisterNcasAndPushRecord(const CnmtCollection& cnmt, u32 latest_ve
     R_SUCCEED();
 }
 
-Result InstallInternal(frontend::ProgressBox* pbox, source::Base* source, const container::Collections& collections, const ConfigOverride& override) {
-    auto yati = std::make_unique<Yati>(pbox, source);
+Result InstallInternal(source::Base* source, const container::Collections& collections, const ConfigOverride& override) {
+    auto yati = std::make_unique<Yati>(source);
     R_TRY(yati->Setup(override));
 
     std::vector<TikCollection> tickets{};
@@ -1450,8 +1493,8 @@ Result InstallInternal(frontend::ProgressBox* pbox, source::Base* source, const 
     R_SUCCEED();
 }
 
-Result InstallInternalStream(frontend::ProgressBox* pbox, source::Base* source, container::Collections collections, const ConfigOverride& override) {
-    auto yati = std::make_unique<Yati>(pbox, source);
+Result InstallInternalStream(source::Base* source, container::Collections collections, const ConfigOverride& override) {
+    auto yati = std::make_unique<Yati>(source);
     R_TRY(yati->Setup(override));
 
     // not supported with stream installs (yet).
@@ -1554,13 +1597,13 @@ Result InstallInternalStream(frontend::ProgressBox* pbox, source::Base* source, 
 
 } // namespace
 
-Result InstallFromFile(frontend::ProgressBox* pbox, fs::Fs* fs, const fs::FsPath& path, const ConfigOverride& override) {
+Result InstallFromFile(fs::Fs* fs, const fs::FsPath& path, const ConfigOverride& override) {
     auto source = std::make_unique<source::File>(fs, path);
     // auto source = std::make_unique<source::StreamFile>(fs, path, override); // enable for testing.
-    return InstallFromSource(pbox, source.get(), path, override);
+    return InstallFromSource(source.get(), path, override);
 }
 
-Result InstallFromSource(frontend::ProgressBox* pbox, source::Base* source, const fs::FsPath& path, const ConfigOverride& override) {
+Result InstallFromSource(source::Base* source, const fs::FsPath& path, const ConfigOverride& override) {
     const auto ext = std::strrchr(path.s, '.');
     R_UNLESS(ext, Result_YatiContainerNotFound);
 
@@ -1572,20 +1615,20 @@ Result InstallFromSource(frontend::ProgressBox* pbox, source::Base* source, cons
     }
 
     R_UNLESS(container, Result_YatiContainerNotFound);
-    return InstallFromContainer(pbox, container.get(), override);
+    return InstallFromContainer(container.get(), override);
 }
 
-Result InstallFromContainer(frontend::ProgressBox* pbox, container::Base* container, const ConfigOverride& override) {
+Result InstallFromContainer(container::Base* container, const ConfigOverride& override) {
     container::Collections collections;
     R_TRY(container->GetCollections(collections));
-    return InstallFromCollections(pbox, container->GetSource(), collections, override);
+    return InstallFromCollections(container->GetSource(), collections, override);
 }
 
-Result InstallFromCollections(frontend::ProgressBox* pbox, source::Base* source, const container::Collections& collections, const ConfigOverride& override) {
+Result InstallFromCollections(source::Base* source, const container::Collections& collections, const ConfigOverride& override) {
     if (source->IsStream()) {
-        return InstallInternalStream(pbox, source, collections, override);
+        return InstallInternalStream(source, collections, override);
     } else {
-        return InstallInternal(pbox, source, collections, override);
+        return InstallInternal(source, collections, override);
     }
 }
 

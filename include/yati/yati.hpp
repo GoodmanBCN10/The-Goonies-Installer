@@ -10,7 +10,6 @@
 #include "fs.hpp"
 #include "source/base.hpp"
 #include "container/base.hpp"
-#include "frontend/progress_box.hpp"
 #include <memory>
 #include <optional>
 
@@ -78,9 +77,9 @@ struct ConfigOverride {
     std::optional<bool> lower_system_version{};
 };
 
-Result InstallFromFile(frontend::ProgressBox* pbox, fs::Fs* fs, const fs::FsPath& path, const ConfigOverride& override = {});
-Result InstallFromSource(frontend::ProgressBox* pbox, source::Base* source, const fs::FsPath& path, const ConfigOverride& override = {});
-Result InstallFromContainer(frontend::ProgressBox* pbox, container::Base* container, const ConfigOverride& override = {});
-Result InstallFromCollections(frontend::ProgressBox* pbox, source::Base* source, const container::Collections& collections, const ConfigOverride& override = {});
+Result InstallFromFile(fs::Fs* fs, const fs::FsPath& path, const ConfigOverride& override = {});
+Result InstallFromSource(source::Base* source, const fs::FsPath& path, const ConfigOverride& override = {});
+Result InstallFromContainer(container::Base* container, const ConfigOverride& override = {});
+Result InstallFromCollections(source::Base* source, const container::Collections& collections, const ConfigOverride& override = {});
 
 } // namespace GooniesInstaller::yati

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "yati/source/base.hpp"
-#include "core_utils/lru.hpp"
+#include "utils/lru.hpp"
 #include "defines.hpp"
 
 #include <switch.h>
@@ -103,7 +103,7 @@ private:
 
     // lru cache of blocks
     std::vector<LruData> m_lru_data{};
-    core_utils::Lru<LruData> m_lru{};
+    utils::Lru<LruData> m_lru{};
 };
 
 } // namespace GooniesInstaller::ncz

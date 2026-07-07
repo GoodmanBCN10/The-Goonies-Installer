@@ -2,7 +2,7 @@
 #include "yati/nx/crypto.hpp"
 #include "yati/nx/es.hpp"
 #include "yati/nx/nxdumptool_rsa.h"
-#include "core_utils/utils.hpp"
+#include "utils/utils.hpp"
 #include "log.hpp"
 
 namespace GooniesInstaller::nca {
@@ -320,7 +320,7 @@ Result GetDecryptedTitleKey(fs::Fs* fs, const fs::FsPath& path, Header& header, 
             // try and get ticket from path as it may not be installed yet.
             fs::FsPath tik_path = path;
             if (auto dilem = std::strrchr(tik_path, '/')) {
-                std::sprintf(dilem, "/%s.tik", core_utils::hexIdToStr(header.rights_id).str);
+                std::sprintf(dilem, "/%s.tik", utils::hexIdToStr(header.rights_id).str);
                 log_write("[NCA] trying to read local ticket file: %s\n", tik_path.s);
                 std::vector<u8> tik_data;
                 if (R_SUCCEEDED(fs->read_entire_file(tik_path, tik_data))) {
@@ -351,8 +351,8 @@ DecyptedData::DecyptedData(u64 align, const std::shared_ptr<yati::source::Base>&
 }
 
 Result DecyptedData::Read(void *_buf, s64 _off, s64 _size, u64* _bytes_read) {
-    const auto aligned_off = core_utils::AlignDown<s64>(_off, m_align);
-    auto aligned_size = core_utils::AlignUp<s64>(_size, m_align);
+    const auto aligned_off = utils::AlignDown<s64>(_off, m_align);
+    auto aligned_size = utils::AlignUp<s64>(_size, m_align);
     if (aligned_off != _off) {
         aligned_size += m_align;
     }

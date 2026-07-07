@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Goonies Installer</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Pantalla de Inicio -->
+        <section id="screen-home" class="screen active">
+            <header class="app-header">
+                <div class="logo-placeholder"></div>
+                <div class="title-container">
+                    <h1>THE GOONIES INSTALLER</h1>
+                    <p class="subtitle">Smart installer for Nintendo Switch</p>
+                </div>
+            </header>
+            
+            <nav class="main-menu">
+                <button onclick="navigate('screen-mtp')" class="btn-primary">
+                    <span class="icon">📲</span> Instalar juegos por MTP
+                </button>
+                <button onclick="navigate('screen-games')" class="btn-primary">
+                    <span class="icon">🎮</span> Juegos Instalados
+                </button>
+                <button onclick="navigate('screen-saves')" class="btn-secondary">
+                    <span class="icon">💾</span> Partidas Guardadas (Saves)
+                </button>
+                <button onclick="navigate('screen-explorer')" class="btn-secondary">
+                    <span class="icon">📂</span> Explorar microSD (solo lectura)
+                </button>
+                <button onclick="navigate('screen-settings')" class="btn-secondary">
+                    <span class="icon">⚙️</span> Ajustes
+                </button>
+            </nav>
+        </section>
+
+        <!-- Pantalla: Instalar juegos por MTP -->
+        <section id="screen-mtp" class="screen">
+            <header class="screen-header">
+                <h2>Instalar por MTP</h2>
+            </header>
+            
+            <div class="mtp-container">
+                <!-- Pastilla superior: Progreso -->
+                <div class="glass-panel progress-panel">
+                    <div class="file-info">
+                        <h3>Instalando: <span id="current-file">Zelda_Tears_of_the_Kingdom_v1.0.nsp</span></h3>
+                        <span class="speed">25.4 MB/s</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: 45%;"></div>
+                    </div>
+                    <div class="progress-stats">
+                        <span>7,3 GB / 16,2 GB</span>
+                        <span>45%</span>
+                    </div>
+                </div>
+
+                <!-- Pastilla inferior: Lista de archivos -->
+                <div class="glass-panel history-panel">
+                    <h3>Archivos en esta sesión</h3>
+                    <ul class="file-list">
+                        <!-- Mock data -->
+                        <li class="file-item success">
+                            <span class="file-name">Super_Mario_Odyssey.nsp</span>
+                            <span class="file-size">5.6 GB</span>
+                            <span class="status">OK</span>
+                        </li>
+                        <li class="file-item error">
+                            <span class="file-name">Update_Mario_v1.2.nsp</span>
+                            <span class="file-size">300 MB</span>
+                            <span class="status">ERROR</span>
+                        </li>
+                        <li class="file-item success">
+                            <span class="file-name">Mario_Kart_8.nsp</span>
+                            <span class="file-size">6.8 GB</span>
+                            <span class="status">OK</span>
+                        </li>
+                        <li class="file-item active-install">
+                            <span class="file-name">Zelda_Tears_of_the_Kingdom_v1.0.nsp</span>
+                            <span class="file-size">16.2 GB</span>
+                            <span class="status">Instalando...</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pantalla: Juegos Instalados -->
+        <section id="screen-games" class="screen">
+            <header class="screen-header">
+                <h2>Juegos Instalados</h2>
+            </header>
+
+            <!-- Grid de juegos -->
+            <div id="games-grid" class="games-grid active-view">
+                <!-- Mock Games -->
+                <div class="game-card" tabindex="0" onclick="showGameDetails('zelda')" onkeypress="if(event.key === 'Enter') showGameDetails('zelda')">
+                    <div class="game-icon zelda-bg"></div>
+                    <div class="game-title-container">
+                        <span class="game-title marquee">The Legend of Zelda: Tears of the Kingdom</span>
+                    </div>
+                </div>
+                <div class="game-card" tabindex="0" onclick="showGameDetails('mario')" onkeypress="if(event.key === 'Enter') showGameDetails('mario')">
+                    <div class="game-icon mario-bg"></div>
+                    <div class="game-title-container">
+                        <span class="game-title">Super Mario Odyssey</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detalle del juego -->
+            <div id="game-details" class="game-details hidden-view">
+                <button onclick="hideGameDetails()" class="btn-close-details">✖ Cerrar Detalles</button>
+                <div class="details-content glass-panel">
+                    <div class="details-header">
+                        <div class="details-icon zelda-bg"></div>
+                        <div class="details-title">
+                            <h2 id="detail-title">The Legend of Zelda: Tears of the Kingdom</h2>
+                            <button class="btn-play">▶ Iniciar Juego</button>
+                            <button class="btn-danger">🗑 Eliminar Juego Completo</button>
+                        </div>
+                    </div>
+                    <div class="details-files">
+                        <h3>Archivos Instalados</h3>
+                        <ul class="installed-files-list">
+                            <li>
+                                <span>Juego Base (v1.0) - 16.2 GB</span>
+                                <button class="btn-small-danger">Eliminar</button>
+                            </li>
+                            <li>
+                                <span>Update (v1.2.0) - 1.1 GB</span>
+                                <button class="btn-small-danger">Eliminar</button>
+                            </li>
+                            <li>
+                                <span>DLC 1 - 500 MB</span>
+                                <button class="btn-small-danger">Eliminar</button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pantalla: Partidas Guardadas -->
+        <section id="screen-saves" class="screen">
+            <header class="screen-header">
+                <h2>Partidas Guardadas (Saves)</h2>
+            </header>
+
+            <!-- Grid de juegos para saves -->
+            <div id="saves-grid" class="games-grid active-view">
+                <div class="game-card" tabindex="0" onclick="showSaveDetails('zelda')" onkeypress="if(event.key === 'Enter') showSaveDetails('zelda')">
+                    <div class="game-icon zelda-bg"></div>
+                    <div class="game-title-container">
+                        <span class="game-title marquee">The Legend of Zelda: Tears of the Kingdom</span>
+                    </div>
+                </div>
+                <div class="game-card" tabindex="0" onclick="showSaveDetails('mario')" onkeypress="if(event.key === 'Enter') showSaveDetails('mario')">
+                    <div class="game-icon mario-bg"></div>
+                    <div class="game-title-container">
+                        <span class="game-title">Super Mario Odyssey</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detalle de Saves -->
+            <div id="save-details" class="game-details hidden-view">
+                <button onclick="hideSaveDetails()" tabindex="0" class="btn-close-details">✖ Cerrar Detalles</button>
+                <div class="details-content glass-panel">
+                    <div class="details-header">
+                        <div class="details-icon zelda-bg" id="save-icon"></div>
+                        <div class="details-title">
+                            <h2 id="save-title">Gestión de Partidas</h2>
+                            <p class="subtitle">Usuario actual: Administrador</p>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <div class="glass-panel" style="text-align: center;">
+                            <h3>Copiar Partida (Backup)</h3>
+                            <p style="color: var(--text-muted); margin-bottom: 15px;">Guarda una copia de la partida actual en la microSD.</p>
+                            <button tabindex="0" class="btn-primary" style="margin:0 auto; width:80%;">Hacer Backup</button>
+                        </div>
+                        <div class="glass-panel" style="text-align: center;">
+                            <h3>Restaurar Partida</h3>
+                            <p style="color: var(--text-muted); margin-bottom: 15px;">Sobrescribe la partida de la consola con un backup.</p>
+                            <button tabindex="0" class="btn-secondary" style="margin:0 auto; width:80%; border:2px solid var(--panel-border);">Restaurar</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 30px; text-align: center;">
+                        <button tabindex="0" class="btn-danger" style="display:inline-block; margin:0 auto;">🗑 Borrar partida de la consola</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pantalla: Explorar microSD -->
+        <section id="screen-explorer" class="screen">
+            <header class="screen-header">
+                <h2>Explorar microSD</h2>
+            </header>
+            
+            <div class="glass-panel explorer-container">
+                <div class="explorer-path">
+                    <span class="icon">📁</span> <span id="current-path">microSD:/</span>
+                </div>
+                <ul class="explorer-list" id="explorer-list">
+                    <!-- Mock de carpetas y archivos -->
+                    <li tabindex="0" class="explorer-item folder" onclick="mockNavigateFolder('Nintendo')">
+                        <span class="icon">📁</span> Nintendo
+                    </li>
+                    <li tabindex="0" class="explorer-item folder" onclick="mockNavigateFolder('atmosphere')">
+                        <span class="icon">📁</span> atmosphere
+                    </li>
+                    <li tabindex="0" class="explorer-item folder" onclick="mockNavigateFolder('switch')">
+                        <span class="icon">📁</span> switch
+                    </li>
+                    <li tabindex="0" class="explorer-item file">
+                        <span class="icon">📄</span> hbmenu.nro
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Pantalla: Ajustes -->
+        <section id="screen-settings" class="screen">
+            <header class="screen-header">
+                <h2>Ajustes</h2>
+            </header>
+
+            <div class="settings-grid">
+                <!-- Información del sistema -->
+                <div class="glass-panel settings-card">
+                    <h3>Información del Sistema</h3>
+                    <ul class="info-list">
+                        <li><strong>Firmware Consola:</strong> 16.0.3 (AMS 1.5.4)</li>
+                        <li><strong>Versión App:</strong> The Goonies Installer v1.0</li>
+                        <li>
+                            <strong>Espacio microSD:</strong>
+                            <div class="progress-bar-container mt-2">
+                                <div class="progress-bar" style="width: 75%;"></div>
+                            </div>
+                            <div class="progress-stats">300 GB / 400 GB (75% Usado)</div>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Preferencias -->
+                <div class="glass-panel settings-card">
+                    <h3>Preferencias</h3>
+                    
+                    <div class="setting-group">
+                        <label>Idioma:</label>
+                        <select class="settings-select">
+                            <option value="es">Castellano</option>
+                            <option value="en">English</option>
+                            <option value="pt">Português</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Tema de Color:</label>
+                        <div class="theme-selector">
+                            <button tabindex="0" class="theme-btn theme-orange active" onclick="setTheme('#FF9900')"></button>
+                            <button tabindex="0" class="theme-btn theme-blue" onclick="setTheme('#00d2ff')"></button>
+                            <button tabindex="0" class="theme-btn theme-green" onclick="setTheme('#4caf50')"></button>
+                            <button tabindex="0" class="theme-btn theme-purple" onclick="setTheme('#9c27b0')"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Footer Controls (Consola) -->
+        <footer id="console-controls" class="console-controls">
+            <div class="control-hint"><span class="btn-hint">A</span> Seleccionar</div>
+            <div id="btn-back-hint" class="control-hint hidden-view"><span class="btn-hint">B</span> Volver</div>
+        </footer>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

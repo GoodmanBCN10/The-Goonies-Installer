@@ -3,7 +3,6 @@
 #include "yati/nx/nxdumptool_rsa.h"
 #include "yati/nx/service_guard.h"
 #include "defines.hpp"
-#include "frontend/types.hpp"
 #include "log.hpp"
 
 #include "yati/nx/nxdumptool/defines.h"

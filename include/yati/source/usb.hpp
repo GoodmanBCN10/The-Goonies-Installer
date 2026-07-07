@@ -1,7 +1,7 @@
 #pragma once
 
 #include "base.hpp"
-#include "backend_usb/usb_installer.hpp"
+#include "usb/usb_installer.hpp"
 
 #include <string>
 #include <vector>
@@ -12,7 +12,7 @@ namespace GooniesInstaller::yati::source {
 
 struct Usb final : Base {
     Usb(u64 transfer_timeout) {
-        m_usb = std::make_unique<backend_usb::install::Usb>(transfer_timeout);
+        m_usb = std::make_unique<usb::install::Usb>(transfer_timeout);
     }
 
     void SignalCancel() override {
@@ -20,7 +20,7 @@ struct Usb final : Base {
     }
 
     bool IsStream() const override {
-        return m_usb->GetFlags() & backend_usb::api::FLAG_STREAM;
+        return m_usb->GetFlags() & usb::api::FLAG_STREAM;
     }
 
     Result Read(void* buf, s64 off, s64 size, u64* bytes_read) override {
@@ -52,7 +52,7 @@ struct Usb final : Base {
     }
 
 private:
-    std::unique_ptr<backend_usb::install::Usb> m_usb{};
+    std::unique_ptr<usb::install::Usb> m_usb{};
 };
 
 } // namespace GooniesInstaller::yati::source

@@ -1,6 +1,5 @@
 #include "fs.hpp"
 #include "defines.hpp"
-#include "frontend/nvg_util.hpp"
 #include "log.hpp"
 
 #include <switch.h>

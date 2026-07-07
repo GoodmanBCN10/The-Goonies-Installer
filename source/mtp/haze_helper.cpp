@@ -1,0 +1,439 @@
+#include "mtp/haze_helper.hpp"
+
+#include <haze.h>
+#include <string>
+#include <vector>
+#include <cstring>
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <stdio.h>
+
+namespace MTP {
+namespace {
+
+struct InstallSharedData {
+    std::mutex mutex;
+    std::string current_file;
+    size_t current_file_size = 0;
+
+    OnInstallStart on_start;
+    OnInstallWrite on_write;
+    OnInstallClose on_close;
+
+    bool in_progress = false;
+    bool enabled = false;
+};
+
+std::atomic_bool g_should_exit = false;
+bool g_is_running = false;
+std::mutex g_mutex;
+InstallSharedData g_shared_data;
+
+const char* SUPPORTED_EXT[] = {
+    ".nsp", ".xci", ".nsz", ".xcz",
+};
+
+void on_thing() {
+    std::lock_guard<std::mutex> lock(g_shared_data.mutex);
+
+    if (!g_shared_data.in_progress) {
+        if (!g_shared_data.current_file.empty()) {
+            if (!g_shared_data.on_start || !g_shared_data.on_start(g_shared_data.current_file.c_str(), g_shared_data.current_file_size)) {
+                g_shared_data.current_file.clear();
+                g_shared_data.current_file_size = 0;
+            } else {
+                g_shared_data.in_progress = true;
+            }
+        }
+    }
+}
+
+struct FsProxyBase : haze::FileSystemProxyImpl {
+    FsProxyBase(const char* name, const char* display_name) : m_name(name), m_display_name(display_name) {}
+
+    const char* GetName() const override {
+        return m_name.c_str();
+    }
+    const char* GetDisplayName() const override {
+        return m_display_name.c_str();
+    }
+
+protected:
+    const std::string m_name;
+    const std::string m_display_name;
+};
+
+struct FsProxyVfs : FsProxyBase {
+    struct File {
+        u64 index{};
+        haze::FileOpenMode mode{};
+    };
+
+    struct Dir {
+        u64 pos{};
+    };
+
+    using FsProxyBase::FsProxyBase;
+    virtual ~FsProxyVfs() = default;
+
+    auto GetFileName(const char* s) -> const char* {
+        const auto file_name = std::strrchr(s, '/');
+        if (!file_name || file_name[1] == '\0') {
+            return nullptr;
+        }
+        return file_name + 1;
+    }
+
+    virtual Result GetEntryType(const char *path, haze::FileAttrType *out_entry_type) {
+        if (std::strcmp(path, "/") == 0 || std::strcmp(path, "") == 0) {
+            *out_entry_type = haze::FileAttrType_DIR;
+            return 0; // R_SUCCEED
+        } else {
+            const auto file_name = GetFileName(path);
+            if(!file_name) return 0x202; // FsError_PathNotFound
+
+            auto it = std::find_if(m_entries.begin(), m_entries.end(), [file_name](auto& e){
+                return !strcasecmp(file_name, e.name);
+            });
+            if(it == m_entries.end()) return 0x202; // FsError_PathNotFound
+
+            *out_entry_type = haze::FileAttrType_FILE;
+            return 0; // R_SUCCEED
+        }
+    }
+
+    virtual Result CreateFile(const char* path, s64 size) {
+        const auto file_name = GetFileName(path);
+        if(!file_name) return 0x202;
+
+        auto it = std::find_if(m_entries.begin(), m_entries.end(), [file_name](auto& e){
+            return !strcasecmp(file_name, e.name);
+        });
+        if(it != m_entries.end()) return 0x402; // PathAlreadyExists
+
+        FsDirectoryEntry entry{};
+        std::strncpy(entry.name, file_name, sizeof(entry.name) - 1);
+        entry.type = FsDirEntryType_File;
+        entry.file_size = size;
+
+        m_entries.push_back(entry);
+        return 0;
+    }
+
+    virtual Result DeleteFile(const char* path) {
+        const auto file_name = GetFileName(path);
+        if(!file_name) return 0x202;
+
+        auto it = std::find_if(m_entries.begin(), m_entries.end(), [file_name](auto& e){
+            return !strcasecmp(file_name, e.name);
+        });
+        if(it == m_entries.end()) return 0x202;
+
+        m_entries.erase(it);
+        return 0;
+    }
+
+    virtual Result RenameFile(const char *old_path, const char *new_path) {
+        const auto file_name = GetFileName(old_path);
+        if(!file_name) return 0x202;
+
+        auto it = std::find_if(m_entries.begin(), m_entries.end(), [file_name](auto& e){
+            return !strcasecmp(file_name, e.name);
+        });
+        if(it == m_entries.end()) return 0x202;
+
+        const auto file_name_new = GetFileName(new_path);
+        if(!file_name_new) return 0x202;
+
+        auto new_it = std::find_if(m_entries.begin(), m_entries.end(), [file_name_new](auto& e){
+            return !strcasecmp(file_name_new, e.name);
+        });
+        if(new_it != m_entries.end()) return 0x402;
+
+        std::strncpy(it->name, file_name_new, sizeof(it->name) - 1);
+        return 0;
+    }
+
+    virtual Result OpenFile(const char *path, haze::FileOpenMode mode, haze::File *out_file) {
+        const auto file_name = GetFileName(path);
+        if(!file_name) return 0x202;
+
+        auto it = std::find_if(m_entries.begin(), m_entries.end(), [file_name](auto& e){
+            return !strcasecmp(file_name, e.name);
+        });
+        if(it == m_entries.end()) return 0x202;
+
+        auto f = new File();
+        f->index = std::distance(m_entries.begin(), it);
+        f->mode = mode;
+        out_file->impl = f;
+        return 0;
+    }
+
+    virtual Result GetFileSize(haze::File *file, s64 *out_size) {
+        auto f = static_cast<File*>(file->impl);
+        *out_size = m_entries[f->index].file_size;
+        return 0;
+    }
+
+    virtual Result SetFileSize(haze::File *file, s64 size) {
+        auto f = static_cast<File*>(file->impl);
+        m_entries[f->index].file_size = size;
+        return 0;
+    }
+
+    virtual Result ReadFile(haze::File *file, s64 off, void *buf, u64 read_size, u64 *out_bytes_read) {
+        return MAKERESULT(Module_Libnx, 1); // Not implemented
+    }
+
+    virtual Result WriteFile(haze::File *file, s64 off, const void *buf, u64 write_size) {
+        auto f = static_cast<File*>(file->impl);
+        auto& e = m_entries[f->index];
+        e.file_size = std::max<s64>(e.file_size, off + write_size);
+        return 0;
+    }
+
+    virtual void CloseFile(haze::File *file) {
+        auto f = static_cast<File*>(file->impl);
+        if (f) {
+            delete f;
+            file->impl = nullptr;
+        }
+    }
+
+    Result CreateDirectory(const char* path) override {
+        return MAKERESULT(Module_Libnx, 1); // Not implemented
+    }
+
+    Result DeleteDirectoryRecursively(const char* path) override {
+        return MAKERESULT(Module_Libnx, 1);
+    }
+
+    Result RenameDirectory(const char *old_path, const char *new_path) override {
+        return MAKERESULT(Module_Libnx, 1);
+    }
+
+    Result OpenDirectory(const char *path, haze::Dir *out_dir) override {
+        auto dir = new Dir();
+        out_dir->impl = dir;
+        return 0;
+    }
+
+    Result ReadDirectory(haze::Dir *d, s64 *out_total_entries, size_t max_entries, haze::DirEntry *buf) override {
+        auto dir = static_cast<Dir*>(d->impl);
+        max_entries = std::min<s64>(m_entries.size() - dir->pos, max_entries);
+
+        for (size_t i = 0; i < max_entries; i++) {
+            std::strncpy(buf[i].name, m_entries[dir->pos + i].name, sizeof(buf[i].name) - 1);
+        }
+
+        dir->pos += max_entries;
+        *out_total_entries = max_entries;
+        return 0;
+    }
+
+    Result GetDirectoryEntryCount(haze::Dir *d, s64 *out_count) override {
+        *out_count = m_entries.size();
+        return 0;
+    }
+
+    void CloseDirectory(haze::Dir *d) override {
+        auto dir = static_cast<Dir*>(d->impl);
+        if (dir) {
+            delete dir;
+            d->impl = nullptr;
+        }
+    }
+
+    virtual Result GetTotalSpace(const char *path, s64 *out) {
+        *out = 1024ULL * 1024ULL * 1024ULL * 256ULL;
+        return 0;
+    }
+
+    virtual Result GetFreeSpace(const char *path, s64 *out) {
+        *out = 1024ULL * 1024ULL * 1024ULL * 256ULL;
+        return 0;
+    }
+
+    virtual Result GetEntryAttributes(const char *path, haze::FileAttr *out) {
+        haze::FileAttrType type;
+        Result rc = GetEntryType(path, &type);
+        if(R_FAILED(rc)) return rc;
+
+        out->type = type;
+        if(type == haze::FileAttrType_FILE) {
+            const auto file_name = GetFileName(path);
+            auto it = std::find_if(m_entries.begin(), m_entries.end(), [file_name](auto& e){
+                return !strcasecmp(file_name, e.name);
+            });
+            if(it != m_entries.end()) {
+                out->size = it->file_size;
+            }
+        }
+        return 0;
+    }
+
+protected:
+    std::vector<FsDirectoryEntry> m_entries;
+};
+
+struct FsInstallProxy final : FsProxyVfs {
+    using FsProxyVfs::FsProxyVfs;
+
+    Result FailedIfNotEnabled() {
+        std::lock_guard<std::mutex> lock(g_shared_data.mutex);
+        if (!g_shared_data.enabled) {
+            return MAKERESULT(Module_Libnx, 1);
+        }
+        return 0;
+    }
+
+    Result IsValidFileType(const char* name) {
+        const char* ext = std::strrchr(name, '.');
+        if (!ext) return MAKERESULT(Module_Libnx, 1);
+
+        bool found = false;
+        for (size_t i = 0; i < std::size(SUPPORTED_EXT); i++) {
+            if (!strcasecmp(ext, SUPPORTED_EXT[i])) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) return MAKERESULT(Module_Libnx, 1);
+        return 0;
+    }
+
+    Result GetEntryType(const char *path, haze::FileAttrType *out_entry_type) override {
+        Result rc = FsProxyVfs::GetEntryType(path, out_entry_type);
+        if(R_FAILED(rc)) return rc;
+        if (*out_entry_type == haze::FileAttrType_FILE) {
+            rc = FailedIfNotEnabled();
+            if(R_FAILED(rc)) return rc;
+        }
+        return 0;
+    }
+
+    Result CreateFile(const char* path, s64 size) override {
+        Result rc = FailedIfNotEnabled();
+        if(R_FAILED(rc)) return rc;
+        rc = IsValidFileType(path);
+        if(R_FAILED(rc)) return rc;
+        return FsProxyVfs::CreateFile(path, size);
+    }
+
+    Result OpenFile(const char *path, haze::FileOpenMode mode, haze::File *out_file) override {
+        Result rc = FailedIfNotEnabled();
+        if(R_FAILED(rc)) return rc;
+        rc = IsValidFileType(path);
+        if(R_FAILED(rc)) return rc;
+        rc = FsProxyVfs::OpenFile(path, mode, out_file);
+        if(R_FAILED(rc)) return rc;
+
+        if (mode == haze::FileOpenMode_WRITE) {
+            auto f = static_cast<File*>(out_file->impl);
+            const auto& e = m_entries[f->index];
+
+            if(!g_shared_data.current_file.empty()) return MAKERESULT(Module_Libnx, 1);
+            g_shared_data.current_file = e.name;
+            g_shared_data.current_file_size = e.file_size;
+            on_thing();
+        }
+        return 0;
+    }
+
+    Result WriteFile(haze::File *file, s64 off, const void *buf, u64 write_size) override {
+        {
+            std::lock_guard<std::mutex> lock(g_shared_data.mutex);
+            if (!g_shared_data.enabled) {
+                return MAKERESULT(Module_Libnx, 1);
+            }
+
+            if (!g_shared_data.on_write || !g_shared_data.on_write(buf, write_size)) {
+                return MAKERESULT(Module_Libnx, 1);
+            }
+        }
+
+        return FsProxyVfs::WriteFile(file, off, buf, write_size);
+    }
+
+    void CloseFile(haze::File *file) override {
+        auto f = static_cast<File*>(file->impl);
+        if (!f) return;
+
+        bool update = false;
+        {
+            std::lock_guard<std::mutex> lock(g_shared_data.mutex);
+            if (f->mode == haze::FileOpenMode_WRITE) {
+                if (g_shared_data.on_close) {
+                    g_shared_data.on_close();
+                }
+                g_shared_data.in_progress = false;
+                g_shared_data.current_file.clear();
+                update = true;
+            }
+        }
+
+        if (update) {
+            on_thing();
+        }
+
+        FsProxyVfs::CloseFile(file);
+    }
+};
+
+haze::FsEntries g_fs_entries;
+
+void haze_callback(const haze::CallbackData *data) {
+    // Optional callback logging
+}
+
+} // namespace
+
+bool Init() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_is_running) return false;
+
+    g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("1. SD Card Install [NSP, NSZ, XCI]", "1. SD Card Install [NSP, NSZ, XCI]"));
+    g_fs_entries.emplace_back(std::make_shared<FsProxyVfs>("2. SD Card Explorer", "2. SD Card Explorer"));
+
+    g_should_exit = false;
+    // Standard Nintendo VID/PID
+    if (!haze::Initialize(haze_callback, g_fs_entries, 0x057E, 0x201D)) {
+        return false;
+    }
+
+    g_is_running = true;
+    return true;
+}
+
+bool IsInit() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_is_running;
+}
+
+void Exit() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_is_running) return;
+
+    haze::Exit();
+    g_is_running = false;
+    g_should_exit = true;
+    g_fs_entries.clear();
+}
+
+void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close) {
+    std::lock_guard<std::mutex> lock(g_shared_data.mutex);
+    g_shared_data.on_start = on_start;
+    g_shared_data.on_write = on_write;
+    g_shared_data.on_close = on_close;
+    g_shared_data.enabled = true;
+}
+
+void DisableInstallMode() {
+    std::lock_guard<std::mutex> lock(g_shared_data.mutex);
+    g_shared_data.enabled = false;
+}
+
+} // namespace MTP

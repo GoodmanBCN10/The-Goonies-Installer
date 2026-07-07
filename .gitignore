@@ -1,6 +1,10 @@
 # Build
 build/
-cmake-build-*/
+*.nro
+*.nso
+*.nacp
+*.pfs0
+*.elf
 
 # IDE
 .vscode/
@@ -13,7 +17,7 @@ cmake-build-*/
 .DS_Store
 Thumbs.db
 
-# CMake
-CMakeUserPresets.json
-
+# Archives
 *.zip
+*.rar
+*.7z

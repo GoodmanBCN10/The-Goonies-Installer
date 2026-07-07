@@ -47,8 +47,11 @@ Result Xci::GetRoot(Root& out) {
 
         for (u32 i = 0; i < out.hfs0.header.total_files; i++) {
             Partition partition{out.hfs0.string_table[i]};
-            R_TRY(ReadPartitionFromHfs0(m_source, out.hfs0, i, partition));
-            out.partitions.emplace_back(partition);
+            if (partition.name == "secure") {
+                R_TRY(ReadPartitionFromHfs0(m_source, out.hfs0, i, partition));
+                out.partitions.emplace_back(partition);
+                break; // Stop reading further partitions so we don't seek past the secure partition's data
+            }
         }
     }
 
