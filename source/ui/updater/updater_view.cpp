@@ -29,6 +29,28 @@ static size_t WriteFileCallback(void* ptr, size_t size, size_t nmemb, void* stre
     return written;
 }
 
+static void remove_recursive(const std::string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return;
+    
+    if (S_ISDIR(st.st_mode)) {
+        DIR* dir = opendir(path.c_str());
+        if (dir) {
+            struct dirent* ent;
+            while ((ent = readdir(dir)) != NULL) {
+                std::string name = ent->d_name;
+                if (name == "." || name == "..") continue;
+                std::string child = path + "/" + name;
+                remove_recursive(child);
+            }
+            closedir(dir);
+        }
+        rmdir(path.c_str());
+    } else {
+        unlink(path.c_str());
+    }
+}
+
 static void ExtractZip(const std::string& temp_zip, brls::Label* status_label, brls::Rectangle* progress_fill) {
     unzFile uf = unzOpen64(temp_zip.c_str());
     if (uf == NULL) {
@@ -52,11 +74,12 @@ static void ExtractZip(const std::string& temp_zip, brls::Label* status_label, b
 
         std::string out_path = std::string("sdmc:/") + filename_inzip;
         
+        std::error_code ec;
         if (out_path.back() == '/') {
-            fs::create_directories(out_path);
+            fs::create_directories(out_path, ec);
         } else {
             fs::path p(out_path);
-            fs::create_directories(p.parent_path());
+            fs::create_directories(p.parent_path(), ec);
             
             if (unzOpenCurrentFile(uf) == UNZ_OK) {
                 std::ofstream out(out_path, std::ios::binary);
@@ -333,33 +356,26 @@ void UpdaterView::PerformUpdate() {
             }
         }
         
-        try {
-            DIR* dir = opendir("sdmc:/");
-            if (dir) {
-                struct dirent* ent;
-                while ((ent = readdir(dir)) != NULL) {
-                    std::string filename = ent->d_name;
-                    if (filename == "." || filename == "..") continue;
-                    
-                    bool keep = false;
-                    for (const auto& k : keep_folders) {
-                        if (filename == k) {
-                            keep = true;
-                            break;
-                        }
-                    }
-                    if (!keep) {
-                        std::string full_path = "sdmc:/" + filename;
-                        if (ent->d_type == DT_DIR) {
-                            fs::remove_all(full_path);
-                        } else {
-                            fs::remove(full_path);
-                        }
+        DIR* dir = opendir("sdmc:/");
+        if (dir) {
+            struct dirent* ent;
+            while ((ent = readdir(dir)) != NULL) {
+                std::string filename = ent->d_name;
+                if (filename == "." || filename == "..") continue;
+                
+                bool keep = false;
+                for (const auto& k : keep_folders) {
+                    if (strcasecmp(filename.c_str(), k.c_str()) == 0) {
+                        keep = true;
+                        break;
                     }
                 }
-                closedir(dir);
+                if (!keep) {
+                    std::string full_path = "sdmc:/" + filename;
+                    remove_recursive(full_path);
+                }
             }
-        } catch (const std::exception& e) {
+            closedir(dir);
         }
 
         brls::sync([this]() { status_label->setText(t("Extrayendo archivos...", "Extracting files...")); });
