@@ -119,15 +119,22 @@ int main(int argc, char* argv[]) {
         curlReady = true;
 
         Result rc = ncmInitialize();
-        if (R_FAILED(rc)) throw std::runtime_error("ncmInitialize failed");
-        ncmReady = true;
+        if (R_SUCCEEDED(rc)) {
+            ncmReady = true;
+            writeLog("ncmInitialize OK");
+        } else {
+            writeLog("ncmInitialize FAILED (non-fatal)");
+        }
 
         writeLog("Starting app");
 
         rc = nsInitialize();
-        if (R_FAILED(rc)) throw std::runtime_error("nsInitialize failed");
-        nsReady = true;
-        writeLog("nsInitialize OK");
+        if (R_SUCCEEDED(rc)) {
+            nsReady = true;
+            writeLog("nsInitialize OK");
+        } else {
+            writeLog("nsInitialize FAILED (non-fatal)");
+        }
 
         rc = esInitialize();
         if (R_SUCCEEDED(rc)) {
@@ -151,6 +158,12 @@ int main(int argc, char* argv[]) {
         else writeLog("setsysInitialize FAILED");
 
         // Init application
+        appletSetFocusHandlingMode(AppletFocusHandlingMode_NoSuspend);
+        NWindow* win = nwindowGetDefault();
+        if (win) {
+            nwindowSetDimensions(win, 1280, 720);
+        }
+
         brls::Platform::APP_LOCALE_DEFAULT = brls::LOCALE_EN_US;
         if (!brls::Application::init()) {
             throw std::runtime_error("Unable to init Borealis application");
@@ -208,13 +221,13 @@ int main(int argc, char* argv[]) {
                 vals.language = 2;
                 std::string err;
                 settings.update(vals, err);
-                brls::Application::notify("Language saved: English. Restart the app to apply.");
+                brls::Application::notify("Language saved: English. Restart app to apply.");
             });
             langDialog->open();
         }
 
-        writeLog("Loading catalog_service...");
         std::string err;
+        writeLog("Loading catalog_service...");
         catalog_service.load(err);
 
         writeLog("Loading metadata_service...");
@@ -237,10 +250,50 @@ int main(int argc, char* argv[]) {
         MTP::Exit();
 
     } catch (const std::exception& e) {
-        brls::Logger::error("Fatal error: %s", e.what());
+        std::string errMsg = std::string("Fatal error: ") + e.what();
+        writeLog(errMsg);
+        consoleInit(NULL);
+        printf("\n====================================================\n");
+        printf(" ERROR AL INICIAR / FATAL ERROR\n");
+        printf("====================================================\n\n");
+        printf(" Details: %s\n\n", e.what());
+        printf(" Log guardado en / Log file saved at:\n");
+        printf(" sdmc:/switch/thegoonies/debug_log.txt\n\n");
+        printf(" Pulsa + o HOME para salir / Press + or HOME to exit.\n");
+        printf("====================================================\n");
+        consoleUpdate(NULL);
+        PadState pad;
+        padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+        padInitializeDefault(&pad);
+        while (appletMainLoop()) {
+            padUpdate(&pad);
+            u64 kDown = padGetButtonsDown(&pad);
+            if (kDown & HidNpadButton_Plus) break;
+            svcSleepThread(50000000ULL);
+        }
+        consoleExit(NULL);
     } catch (...) {
-        brls::Logger::error("Unknown fatal error");
-    }
+        writeLog("Unknown fatal error caught");
+        consoleInit(NULL);
+        printf("\n====================================================\n");
+        printf(" ERROR DESCONOCIDO / UNKNOWN FATAL ERROR\n");
+        printf("====================================================\n\n");
+        printf(" Log guardado en / Log file saved at:\n");
+        printf(" sdmc:/switch/thegoonies/debug_log.txt\n\n");
+        printf(" Pulsa + o HOME para salir / Press + or HOME to exit.\n");
+        printf("====================================================\n");
+        consoleUpdate(NULL);
+        PadState pad;
+        padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+        padInitializeDefault(&pad);
+        while (appletMainLoop()) {
+            padUpdate(&pad);
+            u64 kDown = padGetButtonsDown(&pad);
+            if (kDown & HidNpadButton_Plus) break;
+            svcSleepThread(50000000ULL);
+        }
+        consoleExit(NULL);
+    } 
 
     // Cleanup
     usbHsFsExit();
