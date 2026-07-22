@@ -150,8 +150,13 @@ bool InstalledTitleService::refresh(std::string& error) {
         std::memset(control.get(), 0, sizeof(*control));
         u64 actualSize = 0;
         Result rc = nsGetApplicationControlData(
-            NsApplicationControlSource_Storage, record.application_id,
+            NsApplicationControlSource_CacheOnly, record.application_id,
             control.get(), sizeof(*control), &actualSize);
+        if (R_FAILED(rc)) {
+            rc = nsGetApplicationControlData(
+                NsApplicationControlSource_Storage, record.application_id,
+                control.get(), sizeof(*control), &actualSize);
+        }
         if (R_SUCCEEDED(rc)) {
             NacpLanguageEntry* language = nullptr;
             if (R_SUCCEEDED(nacpGetLanguageEntry(&control->nacp, &language)) &&
