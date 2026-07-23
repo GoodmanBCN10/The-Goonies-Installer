@@ -12,13 +12,14 @@ struct HomebrewTitle {
     std::string author;
     std::vector<u8> icon;
     NacpStruct nacp;
+    bool is_folder = false;
 };
 
 class HomebrewService {
 public:
     HomebrewService();
 
-    bool refresh(std::string& error);
+    bool refresh(const std::string& path, std::string& error);
     std::vector<HomebrewTitle> titles() const;
 
 private:

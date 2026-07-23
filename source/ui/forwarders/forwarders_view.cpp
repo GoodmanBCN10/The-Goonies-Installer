@@ -63,12 +63,16 @@ void HomebrewGridItem::setTitle(const HomebrewTitle& title, std::function<void(c
     this->setVisibility(brls::Visibility::VISIBLE);
     
     nameLabel_->setText(title.name);
-    authorLabel_->setText(title.author);
-    
-    if (!title.icon.empty()) {
-        icon_->setImageFromMem(title.icon.data(), title.icon.size());
+    if (title.is_folder) {
+        authorLabel_->setText("");
+        icon_->setImageFromFile("romfs:/icon_explorer.png");
     } else {
-        icon_->setImageFromFile("romfs:/icon.jpg");
+        authorLabel_->setText(title.author);
+        if (!title.icon.empty()) {
+            icon_->setImageFromMem(title.icon.data(), title.icon.size());
+        } else {
+            icon_->setImageFromFile("romfs:/icon.jpg");
+        }
     }
 }
 
@@ -171,18 +175,23 @@ void HomebrewCell::populate(const HomebrewTitle& title, std::function<void(const
     this->setFocusable(true);
 
     nameLabel_->setText(title.name.empty() ? "Desconocido" : title.name);
-    authorLabel_->setText(title.author.empty() ? "Autor Desconocido" : title.author);
     
-    if (!title.icon.empty()) {
-        icon_->setImageFromMem(title.icon.data(), title.icon.size());
+    if (title.is_folder) {
+        authorLabel_->setText("");
+        icon_->setImageFromFile("romfs:/icon_explorer.png");
     } else {
-        icon_->setImageFromFile("romfs:/icon.jpg");
+        authorLabel_->setText(title.author.empty() ? "Autor Desconocido" : title.author);
+        if (!title.icon.empty()) {
+            icon_->setImageFromMem(title.icon.data(), title.icon.size());
+        } else {
+            icon_->setImageFromFile("romfs:/icon.jpg");
+        }
     }
 }
 
 // --- ForwardersDataSource ---
-ForwardersDataSource::ForwardersDataSource(HomebrewService* service, std::function<void(const HomebrewTitle&)> onClick)
-    : service_(service), onClick_(onClick) {}
+ForwardersDataSource::ForwardersDataSource(std::function<void(const HomebrewTitle&)> onClick)
+    : onClick_(onClick) {}
 
 void ForwardersDataSource::setTitles(const std::vector<HomebrewTitle>& titles, const std::string& query) {
     titles_.clear();
@@ -239,8 +248,8 @@ float ForwardersDataSource::heightForRow(brls::RecyclerFrame* recycler, brls::In
 }
 
 // --- ForwardersView ---
-ForwardersView::ForwardersView(HomebrewService* service)
-    : brls::Box(brls::Axis::COLUMN), service_(service) {
+ForwardersView::ForwardersView(const std::string& currentPath)
+    : brls::Box(brls::Axis::COLUMN), currentPath_(currentPath) {
     
     this->setAlignItems(brls::AlignItems::STRETCH);
 
@@ -263,10 +272,14 @@ ForwardersView::ForwardersView(HomebrewService* service)
     recycler_->estimatedRowHeight = 250;
     
     auto onClick = [this](const HomebrewTitle& title) {
-        brls::Application::pushActivity(new brls::Activity(new ForwarderDetailsView(title)));
+        if (title.is_folder) {
+            brls::Application::pushActivity(new brls::Activity(new ForwardersView(title.path)));
+        } else {
+            brls::Application::pushActivity(new brls::Activity(new ForwarderDetailsView(title)));
+        }
     };
     
-    dataSource_ = new ForwardersDataSource(service_, onClick);
+    dataSource_ = new ForwardersDataSource(onClick);
     dataSource_->setGridView(true, 6);
     recycler_->setDataSource(dataSource_);
     
@@ -278,8 +291,8 @@ ForwardersView::ForwardersView(HomebrewService* service)
     this->addView(new brls::BottomBar());
     
     std::string err;
-    if (service_->refresh(err)) {
-        auto titles = service_->titles();
+    if (service_.refresh(currentPath_, err)) {
+        auto titles = service_.titles();
         dataSource_->setTitles(titles, "");
         recycler_->reloadData();
     } else {
@@ -297,7 +310,7 @@ ForwardersView::ForwardersView(HomebrewService* service)
 
     this->registerAction(t("Buscar", "Search"), brls::BUTTON_Y, [this](brls::View*) {
         brls::Application::getImeManager()->openForText([this](std::string text) {
-            auto titles = service_->titles();
+            auto titles = service_.titles();
             dataSource_->setTitles(titles, text);
             recycler_->reloadData();
             brls::Application::giveFocus(this);

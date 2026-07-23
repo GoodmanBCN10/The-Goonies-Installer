@@ -271,7 +271,7 @@ MainMenu::MainMenu(pipensx::DownloadManager* manager, pipensx::CatalogService* c
     auto m_homebrew = homebrew_;
     buttonsBox->addView(createMenuButton(t("Crear acceso directo", "Create Forwarder"), [this, m_homebrew]() {
         brls::Application::pushActivity(new brls::Activity(
-            new pipensx::ui::ForwardersView(m_homebrew)));
+            new pipensx::ui::ForwardersView("sdmc:/switch/")));
     }));
 
     centerBox->addView(buttonsBox);

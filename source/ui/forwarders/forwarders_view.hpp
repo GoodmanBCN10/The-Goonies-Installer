@@ -49,7 +49,7 @@ private:
 
 class ForwardersDataSource : public brls::RecyclerDataSource {
 public:
-    ForwardersDataSource(HomebrewService* service, std::function<void(const HomebrewTitle&)> onClick);
+    ForwardersDataSource(std::function<void(const HomebrewTitle&)> onClick);
 
     int numberOfRows(brls::RecyclerFrame* recycler, int section) override;
     brls::RecyclerCell* cellForRow(brls::RecyclerFrame* recycler, brls::IndexPath index) override;
@@ -59,7 +59,6 @@ public:
     void setGridView(bool grid, int columns);
 
 private:
-    HomebrewService* service_;
     std::function<void(const HomebrewTitle&)> onClick_;
     std::vector<HomebrewTitle> titles_;
     bool isGridView_ = true;
@@ -68,10 +67,11 @@ private:
 
 class ForwardersView : public brls::Box {
 public:
-    ForwardersView(HomebrewService* service);
+    ForwardersView(const std::string& currentPath = "sdmc:/switch/");
 
 private:
-    HomebrewService* service_;
+    HomebrewService service_;
+    std::string currentPath_;
     brls::RecyclerFrame* recycler_;
     ForwardersDataSource* dataSource_;
 };
